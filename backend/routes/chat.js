@@ -61,20 +61,21 @@ router.post('/message', auth, async (req, res) => {
       return res.status(404).json({ message: 'Chat session not found' });
     }
 
-    // Add user message
+    // Add user message to chat
     chat.messages.push({
       content: message,
-      sender: 'user'
+      sender: 'user',
     });
 
     // Process message and generate bot response
-    const botResponse = await processMessage(message);
+    const { botResponse, newBotIntent } = await processMessage(message, chat.lastBotIntent);
 
     // Add bot response
     chat.messages.push({
       content: botResponse,
       sender: 'bot'
     });
+    chat.lastBotIntent = newBotIntent;
 
     chat.lastActivity = Date.now();
     await chat.save();
@@ -86,8 +87,37 @@ router.post('/message', auth, async (req, res) => {
 });
 
 // Helper function to process messages and generate responses
-async function processMessage(message) {
+async function processMessage(message, lastBotIntent) {
   const lowerMessage = message.toLowerCase();
+
+  // Handle price range follow-up
+  if (lastBotIntent === 'price_inquiry' && lowerMessage === 'yes') {
+    return { botResponse: "Please specify the minimum and maximum price you are looking for, e.g., 'price from 50 to 200'.", newBotIntent: 'awaiting_price_range' };
+  }
+
+  if (lastBotIntent === 'awaiting_price_range' && lowerMessage.includes('price from') && lowerMessage.includes('to')) {
+    const regex = /price from (\d+) to (\d+)/;
+    const match = lowerMessage.match(regex);
+    if (match) {
+      const minPrice = parseInt(match[1]);
+      const maxPrice = parseInt(match[2]);
+      const products = await Product.find({ price: { $gte: minPrice, $lte: maxPrice } }).limit(5);
+
+      if (products.length === 0) {
+        return { botResponse: "I couldn't find any products in that price range. Please try another range.", newBotIntent: null };
+      }
+
+      return {
+        botResponse: `I found ${products.length} products in that price range:\n` +
+          products.map(p => `- ${p.name} ($${p.price})`).join('\n'), newBotIntent: null
+      };
+    }
+  }
+
+  // Handle price range queries (should be checked before general search)
+  if (lowerMessage.includes('price') || lowerMessage.includes('cost')) {
+    return { botResponse: "Our products range from $10 to $1000. Would you like to see products in a specific price range?", newBotIntent: 'price_inquiry' };
+  }
 
   // Handle product search
   if (lowerMessage.includes('search') || lowerMessage.includes('find')) {
@@ -95,26 +125,23 @@ async function processMessage(message) {
     const products = await Product.find({ $text: { $search: searchTerms } }).limit(5);
 
     if (products.length === 0) {
-      return "I couldn't find any products matching your search. Could you try different keywords?";
+      return { botResponse: "I couldn't find any products matching your search. Could you try different keywords?", newBotIntent: null };
     }
 
-    return `I found ${products.length} products matching your search:\n` +
-      products.map(p => `- ${p.name} ($${p.price})`).join('\n');
+    return {
+      botResponse: `I found ${products.length} products matching your search:\n` +
+        products.map(p => `- ${p.name} ($${p.price})`).join('\n'), newBotIntent: null
+    };
   }
 
   // Handle category browsing
   if (lowerMessage.includes('category') || lowerMessage.includes('categories')) {
     const categories = await Product.distinct('category');
-    return `We have the following categories available:\n${categories.join(', ')}`;
-  }
-
-  // Handle price range queries
-  if (lowerMessage.includes('price') || lowerMessage.includes('cost')) {
-    return "Our products range from $10 to $1000. Would you like to see products in a specific price range?";
+    return { botResponse: `We have the following categories available:\n${categories.join(', ')}`, newBotIntent: null };
   }
 
   // Default response
-  return "I can help you search for products, browse categories, or check prices. What would you like to do?";
+  return { botResponse: "I can help you search for products, browse categories, or check prices. What would you like to do?", newBotIntent: null };
 }
 
 module.exports = router; 

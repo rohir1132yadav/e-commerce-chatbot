@@ -34,6 +34,10 @@ const chatSchema = new mongoose.Schema({
   lastActivity: {
     type: Date,
     default: Date.now
+  },
+  lastBotIntent: {
+    type: String,
+    default: null
   }
 });
 

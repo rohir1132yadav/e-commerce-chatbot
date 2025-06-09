@@ -6,7 +6,11 @@ require('dotenv').config();
 const app = express();
 
 // CORS configuration
-const allowedOrigins = ['http://localhost:5173', 'https://your-vercel-app-name.vercel.app']; // Add your Vercel domain here
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'http://localhost:5173'
+];
+
 const corsOptions = {
   origin: function (origin, callback) {
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
